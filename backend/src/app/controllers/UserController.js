@@ -1,0 +1,91 @@
+import * as Yup from 'yup';
+import User from '../models/User';
+import File from '../models/File';
+
+class UserController {
+  async store(req, res) {
+    const schema = Yup.object().shape({
+      name: Yup.string().required('Name is required'),
+      email: Yup.string()
+        .email('Is not a valid email')
+        .required('Email is required'),
+      password: Yup.string()
+        .min(6, 'Password must have at least 6 characters')
+        .required('Password is required'),
+    });
+
+    schema.validate(req.body).catch((err) => {
+      const messageError = err.errors[0];
+      return res.status(400).json({ error: messageError });
+    });
+
+    const userExists = await User.findOne({ where: { email: req.body.email } });
+
+    if (userExists) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+
+    const { id, name, email, provider } = await User.create(req.body);
+    return res.json({ id, name, email, provider });
+  }
+
+  async update(req, res) {
+    const schema = Yup.object().shape({
+      name: Yup.string(),
+      email: Yup.string().email('Is not a valid email'),
+      oldPassword: Yup.string().min(
+        6,
+        'Password must have at least 6 characters'
+      ),
+      password: Yup.string()
+        .min(6, 'Password must have at least 6 characters')
+        .when('oldPassword', (oldPassword, field) =>
+          oldPassword ? field.required('Password is required') : field
+        ),
+      confirmPassword: Yup.string().when('password', (password, field) =>
+        password
+          ? field.required('Password is required').oneOf([Yup.ref('password')])
+          : field
+      ),
+    });
+
+    schema.validate(req.body).catch((err) => {
+      const messageError = err.errors[0];
+      return res.status(400).json({ error: messageError });
+    });
+
+    const { email, oldPassword } = req.body;
+
+    const user = await User.findByPk(req.userId);
+
+    if (email !== user.email) {
+      const userExists = await User.findOne({
+        where: { email },
+      });
+
+      if (userExists) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+    }
+
+    if (oldPassword && !(await user.checkPassword(oldPassword))) {
+      return res.status(401).json({ error: 'Password does not match' });
+    }
+
+    await user.update(req.body);
+
+    const { id, name, avatar } = await User.findByPk(req.userId, {
+      include: [
+        {
+          model: File,
+          as: 'avatar',
+          attributes: ['id', 'path', 'url'],
+        },
+      ],
+    });
+
+    return res.json({ id, name, email, avatar });
+  }
+}
+
+export default new UserController();
